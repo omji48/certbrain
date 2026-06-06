@@ -27,9 +27,15 @@ export default function App() {
   const [stats, setStats] = useState<Stats>({ total: 0, last_updated: "—", pending_review: 0, pending_review_files: [] });
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [selectedReviewFile, setSelectedReviewFile] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Manual Review Form State
+  const [reviewForm, setReviewForm] = useState({
+    cert_name: "", issuer: "", year: "", one_liner: "", use_case: "", interview_answer: "", learnings: ""
+  });
 
   // ── Load data on mount ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -98,6 +104,33 @@ export default function App() {
   const selectedCert = selectedIndex !== null ? filtered[selectedIndex] : null;
   const reviewFiles = stats.pending_review_files ?? [];
 
+  async function submitManualReview(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedReviewFile) return;
+    try {
+      const payload = {
+        ...reviewForm,
+        learnings: reviewForm.learnings.split(",").map(s => s.trim()).filter(Boolean),
+        source_file: selectedReviewFile
+      };
+      const res = await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setScanMsg("Saved manual review!");
+        setSelectedReviewFile(null);
+        await fetchAll();
+        setTimeout(() => setScanMsg(null), 3000);
+      }
+    } catch (err) {
+      console.error(err);
+      setScanMsg("Failed to save.");
+      setTimeout(() => setScanMsg(null), 3000);
+    }
+  }
+
   return (
     <div className="flex flex-col h-screen bg-[#0A0A0B] text-[#E0E0E0] font-sans overflow-hidden border border-[#222]">
 
@@ -148,7 +181,7 @@ export default function App() {
                 type="text"
                 placeholder="Filter certifications..."
                 value={query}
-                onChange={e => { setQuery(e.target.value); setSelectedIndex(null); }}
+                onChange={e => { setQuery(e.target.value); setSelectedIndex(null); setSelectedReviewFile(null); }}
                 className="w-full bg-[#151518] border border-[#222] rounded-lg py-2 pl-10 pr-4 text-xs focus:outline-none focus:border-[#3B82F6] text-white transition-colors"
               />
             </div>
@@ -169,7 +202,7 @@ export default function App() {
                 return (
                   <div
                     key={index}
-                    onClick={() => setSelectedIndex(index)}
+                    onClick={() => { setSelectedIndex(index); setSelectedReviewFile(null); }}
                     className={`p-4 rounded-xl border transition-colors cursor-pointer ${
                       isActive
                         ? "bg-[#3B82F6]/10 border-[#3B82F6]/20"
@@ -200,15 +233,25 @@ export default function App() {
                   <div className="px-5 pt-4 pb-2 text-[10px] font-bold text-[#555] uppercase mt-2">
                     Needs Manual Review
                   </div>
-                  {reviewFiles.map((file, index) => (
-                    <div key={index} className="mx-2 p-4 rounded-xl border border-red-900/30 bg-red-950/10 cursor-default">
+                  {reviewFiles.map((file, index) => {
+                    const isActive = selectedReviewFile === file;
+                    return (
+                    <div 
+                      key={index} 
+                      onClick={() => {
+                        setSelectedReviewFile(file);
+                        setSelectedIndex(null);
+                        setReviewForm({ cert_name: "", issuer: "", year: "", one_liner: "", use_case: "", interview_answer: "", learnings: "" });
+                      }}
+                      className={`mx-2 p-4 rounded-xl border cursor-pointer transition-colors ${isActive ? 'bg-red-900/30 border-red-500/50' : 'border-red-900/30 bg-red-950/10 hover:bg-red-900/20'}`}
+                    >
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-red-400 break-all text-xs">{file}</span>
+                        <span className={`font-bold break-all text-xs ${isActive ? 'text-white' : 'text-red-400'}`}>{file}</span>
                         <span className="text-[9px] bg-red-500 text-white px-1.5 py-0.5 rounded shrink-0 ml-2">FAILED</span>
                       </div>
                       <p className="text-[10px] text-red-800 mt-1 uppercase font-semibold">Could not extract automatically</p>
                     </div>
-                  ))}
+                  )})}
                 </>
               )}
             </div>
@@ -220,15 +263,68 @@ export default function App() {
         </aside>
 
         {/* ── Main Panel ─────────────────────────────────────────────────── */}
-        <section className="flex-1 bg-[#0A0A0B] p-12 overflow-y-auto relative z-0">
-          {!selectedCert ? (
-            <div className="flex flex-col items-center justify-center h-full opacity-50">
+        <section className="flex-1 bg-[#0A0A0B] p-0 overflow-y-auto relative z-0 flex flex-col">
+          {!selectedCert && !selectedReviewFile ? (
+            <div className="flex flex-col items-center justify-center h-full opacity-50 p-12">
               <Search className="w-16 h-16 text-[#444] mb-4 stroke-[1.5px]" />
               <h2 className="text-2xl font-bold text-[#AAA]">Select a certificate to view details</h2>
               <p className="text-[#555] mt-2 text-sm">Or click "SCAN FOR NEW CERTS" to process the folder</p>
             </div>
-          ) : (
-            <div className="max-w-4xl" key={selectedIndex}>
+          ) : selectedReviewFile ? (
+            <div className="flex flex-1 overflow-hidden">
+              {/* File Preview */}
+              <div className="w-1/2 border-r border-[#1A1A1C] bg-[#111] p-4 flex flex-col">
+                <h3 className="text-sm font-bold text-white mb-4 shrink-0">File Preview: <span className="text-[#3B82F6]">{selectedReviewFile}</span></h3>
+                <div className="flex-1 bg-white rounded overflow-hidden">
+                  {selectedReviewFile.toLowerCase().endsWith('.pdf') ? (
+                    <iframe src={`/api/file/${encodeURIComponent(selectedReviewFile)}`} className="w-full h-full border-0" />
+                  ) : (
+                    <img src={`/api/file/${encodeURIComponent(selectedReviewFile)}`} className="w-full h-full object-contain" />
+                  )}
+                </div>
+              </div>
+              {/* Review Form */}
+              <div className="w-1/2 p-8 overflow-y-auto">
+                <h2 className="text-2xl font-bold text-white mb-6">Manual Entry</h2>
+                <form onSubmit={submitManualReview} className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-widest text-[#888] font-bold mb-1">Cert Name</label>
+                    <input required value={reviewForm.cert_name} onChange={e => setReviewForm(r => ({...r, cert_name: e.target.value}))} className="w-full bg-[#151518] border border-[#333] rounded px-3 py-2 text-white focus:border-[#3B82F6] outline-none" />
+                  </div>
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                      <label className="block text-[10px] uppercase tracking-widest text-[#888] font-bold mb-1">Issuer</label>
+                      <input required value={reviewForm.issuer} onChange={e => setReviewForm(r => ({...r, issuer: e.target.value}))} className="w-full bg-[#151518] border border-[#333] rounded px-3 py-2 text-white focus:border-[#3B82F6] outline-none" />
+                    </div>
+                    <div className="w-24">
+                      <label className="block text-[10px] uppercase tracking-widest text-[#888] font-bold mb-1">Year</label>
+                      <input required value={reviewForm.year} onChange={e => setReviewForm(r => ({...r, year: e.target.value}))} className="w-full bg-[#151518] border border-[#333] rounded px-3 py-2 text-white focus:border-[#3B82F6] outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-widest text-[#888] font-bold mb-1">The Gist (One-liner)</label>
+                    <input required value={reviewForm.one_liner} onChange={e => setReviewForm(r => ({...r, one_liner: e.target.value}))} className="w-full bg-[#151518] border border-[#333] rounded px-3 py-2 text-white focus:border-[#3B82F6] outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-widest text-[#888] font-bold mb-1">Learnings (comma separated)</label>
+                    <input required value={reviewForm.learnings} onChange={e => setReviewForm(r => ({...r, learnings: e.target.value}))} placeholder="e.g. Threat modeling, Firewall config" className="w-full bg-[#151518] border border-[#333] rounded px-3 py-2 text-white focus:border-[#3B82F6] outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-widest text-[#888] font-bold mb-1">Practical Use Case</label>
+                    <textarea required value={reviewForm.use_case} onChange={e => setReviewForm(r => ({...r, use_case: e.target.value}))} className="w-full bg-[#151518] border border-[#333] rounded px-3 py-2 text-white focus:border-[#3B82F6] outline-none h-20" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-widest text-[#888] font-bold mb-1">Interview Master Answer</label>
+                    <textarea required value={reviewForm.interview_answer} onChange={e => setReviewForm(r => ({...r, interview_answer: e.target.value}))} className="w-full bg-[#151518] border border-[#333] rounded px-3 py-2 text-white focus:border-[#3B82F6] outline-none h-24" />
+                  </div>
+                  <button type="submit" className="w-full bg-[#3B82F6] text-white font-bold py-3 rounded hover:bg-blue-600 transition-colors">
+                    Save to Knowledge Base
+                  </button>
+                </form>
+              </div>
+            </div>
+          ) : selectedCert ? (
+            <div className="max-w-4xl p-12" key={selectedIndex}>
               <div className="flex items-baseline justify-between mb-2">
                 <span className="text-sm font-mono text-[#3B82F6] uppercase font-bold tracking-widest">
                   {selectedCert.issuer ?? "Unknown Issuer"}
@@ -297,7 +393,7 @@ export default function App() {
                 </div>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* Toast */}
           {scanMsg && (

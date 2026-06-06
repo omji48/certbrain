@@ -3,8 +3,8 @@ import os
 import json
 import threading
 from flask import Flask, jsonify, render_template, request, send_from_directory
-from scanner import scan_certs
-from processor import process_new_certs, deduplicate_certs
+from scanner import scan_certs, CERT_DIR
+from processor import process_new_certs, deduplicate_certs, load_certs, save_certs, load_review, save_review, save_markdown
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
@@ -71,6 +71,55 @@ def api_scan_status():
         "scanning": state.get("scanning", False),
         "last_updated": state.get("last_updated", "Never"),
     })
+
+
+@app.route("/api/file/<path:filename>")
+def api_file(filename):
+    """Serve the raw PDF or image file from the certs directory."""
+    import os
+    from flask import send_file
+    filepath = os.path.join(CERT_DIR, filename)
+    if os.path.exists(filepath):
+        return send_file(filepath)
+    return jsonify({"error": "File not found", "path": filepath}), 404
+
+
+@app.route("/api/review", methods=["POST"])
+def api_review():
+    """Submit manual review for a flagged file."""
+    data = request.json
+    filename = data.get("source_file")
+    
+    if not filename:
+        return jsonify({"error": "Missing source_file"}), 400
+
+    from datetime import datetime
+    new_cert = {
+        "cert_name": data.get("cert_name"),
+        "issuer": data.get("issuer"),
+        "year": data.get("year"),
+        "one_liner": data.get("one_liner"),
+        "learnings": data.get("learnings", [None, None, None]),
+        "use_case": data.get("use_case"),
+        "interview_answer": data.get("interview_answer"),
+        "source_file": filename,
+        "processed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S (Manual)")
+    }
+
+    # 1. Add to certs.json and deduplicate
+    certs = load_certs()
+    certs.append(new_cert)
+    certs = deduplicate_certs(certs)
+    save_certs(certs)
+    save_markdown(certs)
+
+    # 2. Remove from review list
+    review = load_review()
+    if filename in review:
+        review.remove(filename)
+        save_review(review)
+
+    return jsonify({"status": "success"})
 
 
 if __name__ == "__main__":

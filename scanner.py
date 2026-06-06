@@ -7,7 +7,7 @@ import os
 import json
 from datetime import datetime
 
-CERT_DIR = os.path.expanduser("~/Documents/certs-pdf")
+CERT_DIR = os.path.abspath(os.path.expanduser("~/Documents/certs-pdf"))
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
 

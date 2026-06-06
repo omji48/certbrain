@@ -23,6 +23,9 @@ CERTS_MD_FILE = os.path.join(DATA_DIR, "certs.md")
 REVIEW_FILE = os.path.join(DATA_DIR, "needs_manual_review.json")
 
 # ── Ollama Cloud config ───────────────────────────────────────────────────────
+from dotenv import load_dotenv
+load_dotenv()
+
 OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "")
 OLLAMA_BASE_URL = "https://ollama.com/v1"
 OLLAMA_MODEL = "gemma3:27b"
